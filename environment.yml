@@ -1,0 +1,19 @@
+name: HDPhasePrecession
+channels:
+  - conda-forge
+  - nvidia
+  - defaults
+dependencies:
+  - python=3.9
+  - numpy
+  - matplotlib
+  - ipython
+  - ipykernel
+  - jupyter
+  - psutil
+  - pyzmq
+  - tornado
+  - setuptools
+  - pip
+  - pip:
+      - brainpy
