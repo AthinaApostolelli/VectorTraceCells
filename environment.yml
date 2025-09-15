@@ -1,4 +1,4 @@
-name: HDPhasePrecession
+name: VTC
 channels:
   - conda-forge
   - nvidia
