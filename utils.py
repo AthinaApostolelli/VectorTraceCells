@@ -284,6 +284,7 @@ def PC_response(r, d_i, beta, sigma0, addnoise=False, noise_level=0.1):
     response : float or np.ndarray
         The PC's firing rate at the specified (r) location.
     """
+    # TODO: re-define? 
     sigma_rad_x = ((r[0] - d_i[0]) / beta + 1) * sigma0
     sigma_rad_y = ((r[1] - d_i[1]) / beta + 1) * sigma0
 
@@ -392,7 +393,6 @@ def compute_firing_rate_map(positions, rate, timestamps, bin_size=0.02, smoothin
 
     # Prepare extent for plotting
     extent = [x_bins[0], x_bins[-1], y_bins[0], y_bins[-1]]
-
 
     return rate_map, dwell_times, spike_counts, extent
 
@@ -525,8 +525,7 @@ def get_boundary_distances(Position, Env, boundary_segments=360):
 
     dist_to_walls = intercepts[:, :, :, 0]
 
-    # 4. TODO Only consider the first boundary forward from a ray. The ones behind it are shaded by closer walls. 
-
+    # 4. Only consider the first boundary forward from a ray. The ones behind it are shaded by closer walls. 
     strongest_response_to_walls = boundary_vector_preference_function(intercepts)
 
     first_wall = np.expand_dims(np.argmax(strongest_response_to_walls, axis=-1), axis=-1)

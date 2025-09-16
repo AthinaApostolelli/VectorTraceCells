@@ -12,28 +12,25 @@ class PC_cell(bp.DynamicalSystem):
         m0=10.0,
         k=1.0,
         a=0.08,
-        goal_a = 0.08, 
+        sigma_x=0.05,
         A=10.0,
         J0=4.0,
-        goal_J0 = 500.,
         z_min=0,
         z_max=1,
-        goal_loc=None,
     ):
 
         super(PC_cell, self).__init__()
 
         # Hyper-parameters
         self.num = num  # number of neurons at each dimension
-        self.tau = tau  # The synaptic time constant
-        self.tauv = tauv  # The time constant of firign rate adaptation
-        self.m = tau / tauv * m0  # The adaptation strength
-        self.k = k  # Degree of the rescaled inhibition
-        self.a = a  # Half-width of the range of excitatory connections
-        self.A = A  # Magnitude of the external input
+        self.tau = tau  # synaptic time constant
+        self.tauv = tauv  # time constant of firing rate adaptation
+        self.m = tau / tauv * m0  # adaptation strength
+        self.k = k  # degree of the rescaled inhibition
+        self.a = a  # half-width of the range of excitatory connections
+        self.sigma_x = sigma_x  # radial extent of tuning 
+        self.A = A  # magnitude of the external input
         self.J0 = J0  # maximum connection value
-        self.goal_J0 = goal_J0
-        self.goal_a = goal_a
 
         # feature space
         self.z_range = z_max - z_min
@@ -45,21 +42,14 @@ class PC_cell(bp.DynamicalSystem):
         # Synaptic connections
         self.conn_mat = self.make_conn()
         
-        if goal_loc is not None:
-            self.goal_loc = bm.array(goal_loc).reshape(1,2)
-            self.gd_conn = self.make_gd_conn(self.goal_loc)  
-            self.conn_mat = self.conn_mat + self.gd_conn
-
-        # Define variables we want to update
+        # Initialize dynamical variables
         self.r = bm.Variable(bm.zeros((num, num)))  # firing rate of all PCs
         self.u = bm.Variable(bm.zeros((num, num)))  # presynaptic input of all PCs
         self.v = bm.Variable(bm.zeros((num, num)))  # firing rate adaptation of all PCs
         self.center = bm.Variable(bm.zeros(2))  # center of the bump
-        self.loc_input = bm.Variable(
-            bm.zeros((num, num))
-        )  # Location dependent sensory input to the networks
+        self.loc_input = bm.Variable(bm.zeros((num, num)))  # location-dependent sensory input
 
-        # define the integrator
+        # Define the integrator
         self.integral = bp.odeint(method="exp_euler", f=self.derivative)
 
     @property
@@ -79,7 +69,6 @@ class PC_cell(bp.DynamicalSystem):
             # d = self.dist(bm.abs(v - self.value_index)) # GC connectivity
             d = bm.abs(v - self.value_index) # 2D CAN connectivity
             d = bm.linalg.norm(d, axis=1)
-            # d = d.reshape((self.length, self.length))
             Jxx = (
                 self.J0
                 * bm.exp(-0.5 * bm.square(d / self.a))
@@ -88,47 +77,6 @@ class PC_cell(bp.DynamicalSystem):
             return Jxx
 
         return get_J(self.value_index)
-
-    def make_gd_conn(self, goal_loc):
-        #add a goal directed connection to the neurons at the goal location with a Gaussian profile
-        @jax.vmap
-        def get_J(v):
-            d = self.dist(bm.abs(v - goal_loc))
-            d = bm.linalg.norm(d, axis=1)
-            Jxx = (
-                self.goal_J0
-                * bm.exp(-0.5 * bm.square(d / self.goal_a))
-                / (bm.sqrt(2 * bm.pi) * self.goal_a)
-            )
-            return Jxx
-        
-        conn_vec = get_J(self.value_index)
-        
-        '''
-        #asymmetric connection of a neuron
-        #find the cloest index in self.value_grid to the goal location
-        distances = bm.linalg.norm(self.goal_loc - self.value_index, axis=1)
-        closest_index = bm.argmin(distances)
-        
-        #geterante a zeros matrix the same size as self.conn_mat, and out only the closest_index column as 
-        goal_conn_mat = bm.zeros_like(self.conn_mat)
-        goal_conn_mat[:,closest_index] = conn_vec.reshape(-1,)
-        '''
-        
-        #asymmetric connection of multiple neurons
-        d = self.dist(bm.abs(self.goal_loc - self.value_index))
-        distances = bm.linalg.norm(d, axis=1)
-        #rank the distances from low to high and get the index
-        closest_index = bm.argsort(distances)
-        goal_conn_mat = bm.zeros_like(self.conn_mat)
-        for i, index in enumerate(closest_index):
-            # if i < 5000:
-            if True:
-                rank_dist = distances[index]
-                alpha = 1 - rank_dist / (bm.max(distances)-bm.min(distances))
-                goal_conn_mat[:,index] = conn_vec.reshape(-1,) * alpha 
-        
-        return goal_conn_mat
 
     def location_input(self, Animal_location, theta_mod):
         # return bump input (same dim as neuronal space) from a x-y location
@@ -141,9 +89,9 @@ class PC_cell(bp.DynamicalSystem):
         d = d.reshape((self.num, self.num))
 
         # Gaussian bump input
-        loc_input = self.A * bm.exp(-0.25 * bm.square(d / self.a))
+        loc_input = self.A * bm.exp(-0.25 * bm.square(d / self.sigma_x))
 
-        # further theta modulation
+        # Theta modulation
         loc_input = loc_input * theta_mod
 
         return loc_input
@@ -170,13 +118,11 @@ class PC_cell(bp.DynamicalSystem):
 class BV_cell(bp.DynamicalSystem):
     def __init__(
         self,
-        noise_stre=0.,
         num_r=10,
         num_a=36,
         tau=10.0,
         tau_v=100.0,
         mbar=75.0,
-        a=0.5,
         A=1.0,
         beta=0.183, 
         sigma0=0.0122,
@@ -192,21 +138,19 @@ class BV_cell(bp.DynamicalSystem):
         super(BV_cell, self).__init__()
 
         # dynamics parameters
-        self.tau = tau  # The synaptic time constant
-        self.tau_v = tau_v  # The time constant of the adaptation variable
+        self.tau = tau  # synaptic time constant
+        self.tau_v = tau_v  # time constant of the adaptation variable
         self.num_r = num_r  # number of excitatory neurons for radial dimension
         self.num_a = num_a  # number of excitatory neurons for angular dimension
         self.num = self.num_r * self.num_a 
-        self.k = k  # Degree of the rescaled inhibition
-        self.a = a  # Half-width of the range of excitatory connections
-        self.A = A  # Magnitude of the external input
+        self.k = k  # degree of the rescaled inhibition
+        self.A = A  # magnitude of the external input
         self.g = g
         self.J0 = J0/g  # maximum connection value
         self.m = mbar * tau / tau_v
-        self.beta = beta  # Controls tuning's radial extent with distance
-        self.sigma0 = sigma0  # Tuning's radial extent at 0 distance
-        self.sigma_a = sigma_a  # Tuning's angular extent
-        self.noise_stre = noise_stre
+        self.beta = beta  # controls tuning's radial extent with distance
+        self.sigma0 = sigma0  # tuning's radial extent at 0 distance
+        self.sigma_a = sigma_a  # tuning's angular extent
 
         # feature space - radial
         self.x_min = x_min
@@ -222,7 +166,7 @@ class BV_cell(bp.DynamicalSystem):
         linspace_z = bm.linspace(z_min, z_max, num_a + 1)  # The encoded feature values
         self.value_angle = linspace_z[0:-1]
 
-        # initialize dynamical variables
+        # Initialize dynamical variables
         self.r = bm.Variable(bm.zeros(self.num))
         self.u = bm.Variable(bm.zeros(self.num))
         self.v = bm.Variable(bm.zeros(self.num))
@@ -230,7 +174,7 @@ class BV_cell(bp.DynamicalSystem):
         self.center_I = bm.Variable(bm.zeros(2))
         self.center = bm.Variable(bm.zeros(2))
 
-        # 定义积分器
+        # Define the integrator
         self.integral = bp.odeint(method="exp_euler", f=self.derivative)
 
     def circle_period(self, d):
@@ -250,7 +194,8 @@ class BV_cell(bp.DynamicalSystem):
         d = bm.abs(bm.asarray(Boundary_distance) - self.value_radial)
 
         # Gaussian bump input
-        radial_input = self.A * bm.exp(-0.25 * bm.square(d / self.a)) # TODO or 0.5?
+        self.sigma_r = (d / self.beta + 1) * self.sigma0
+        radial_input = self.A * bm.exp(-0.25 * bm.square(d / self.sigma_r)) # TODO or 0.5?
 
         return radial_input
     
@@ -293,9 +238,6 @@ class BV_cell(bp.DynamicalSystem):
         angular = bm.stack([self.angular_input(theta) for theta in Boundary_angle])  # (N, num_a)
 
         # Now compute outer products in one go
-        # radial[:, :, None] -> (N, num_r, 1)
-        # angular[:, None, :] -> (N, 1, num_a)
-        # broadcasting -> (N, num_r, num_a)
         inputs = radial[:, :, None] * angular[:, None, :]   # all outer products
         inputs = inputs * delta_theta
 
